@@ -7,6 +7,8 @@ module Jammit
   # all stylesheets, with all enabled assets inlined into the css.
   class Compressor
 
+    require 'v8'
+
     # Mapping from extension to mime-type of all embeddable assets.
     EMBED_MIME_TYPES = {
       '.png'  => 'image/png',
@@ -108,14 +110,16 @@ module Jammit
     # specified your own preferred function, or turned it off.
     # JST templates are named with the basename of their file.
     def compile_jst(paths)
-      namespace   = Jammit.template_namespace
-      paths       = paths.grep(Jammit.template_extension_matcher).sort
-      base_path   = find_base_path(paths)
-      compiled    = paths.map do |path|
-        contents  = read_binary_file(path)
-        contents  = contents.gsub(/\r?\n/, "\\n").gsub("'", '\\\\\'')
-        name      = template_name(path, base_path)
-        "#{namespace}['#{name}'] = #{Jammit.template_function}('#{contents}');"
+      cxt = V8::Context.new
+      cxt.load 'public/javascripts/vendor/haml.js'
+
+      namespace = Jammit.template_namespace
+      paths = paths.grep(Jammit.template_extension_matcher).sort
+      base_path = find_base_path(paths)
+      compiled = paths.map do |path|
+        name = template_name(path, base_path)
+        cxt['hamlTemplate'] = IO.read(path)
+        "JST['#{name}'] = function(locals) { with(locals || {}) { return " + cxt.eval_js('Haml.optimize(Haml.compile(hamlTemplate))').strip + "; } };"
       end
       compiler = Jammit.include_jst_script ? read_binary_file(DEFAULT_JST_SCRIPT) : '';
       setup_namespace = "#{namespace} = #{namespace} || {};"
